@@ -80,13 +80,13 @@ final class AppSettings {
     @ObservationIgnored private let defaults: UserDefaults
 
     var fontChoice: FontChoice { didSet { defaults.set(fontChoice.rawValue, forKey: "fontChoice") } }
-    var fontSize: Double { didSet { store(&fontSize, "fontSize", Self.fontSizeRange) } }
-    var lineSpacing: Double { didSet { store(&lineSpacing, "lineSpacing", Self.lineSpacingRange) } }
-    var letterSpacing: Double { didSet { store(&letterSpacing, "letterSpacing", Self.letterSpacingRange) } }
+    var fontSize: Double { didSet { defaults.set(fontSize, forKey: "fontSize") } }
+    var lineSpacing: Double { didSet { defaults.set(lineSpacing, forKey: "lineSpacing") } }
+    var letterSpacing: Double { didSet { defaults.set(letterSpacing, forKey: "letterSpacing") } }
     var fontWeight: FontWeightChoice { didSet { defaults.set(fontWeight.rawValue, forKey: "fontWeight") } }
     var textAlignment: TextAlignmentChoice { didSet { defaults.set(textAlignment.rawValue, forKey: "textAlignment") } }
-    var panelWidth: Double { didSet { store(&panelWidth, "panelWidth", Self.widthRange) } }
-    var panelHeight: Double { didSet { store(&panelHeight, "panelHeight", Self.heightRange) } }
+    var panelWidth: Double { didSet { defaults.set(panelWidth, forKey: "panelWidth") } }
+    var panelHeight: Double { didSet { defaults.set(panelHeight, forKey: "panelHeight") } }
     /// 0 means "the screen with the notch" (or the main screen when there is none).
     var targetDisplayID: UInt32 { didSet { defaults.set(Int(targetDisplayID), forKey: "targetDisplayID") } }
     var placement: PlacementMode { didSet { defaults.set(placement.rawValue, forKey: "placement") } }
@@ -99,29 +99,31 @@ final class AppSettings {
     var hideFromCapture: Bool { didSet { defaults.set(hideFromCapture, forKey: "hideFromCapture") } }
     var showTimer: Bool { didSet { defaults.set(showTimer, forKey: "showTimer") } }
     var showPace: Bool { didSet { defaults.set(showPace, forKey: "showPace") } }
-    var targetPace: Double { didSet { store(&targetPace, "targetPace", Self.targetPaceRange) } }
+    var targetPace: Double { didSet { defaults.set(targetPace, forKey: "targetPace") } }
     var pauseOnHover: Bool { didSet { defaults.set(pauseOnHover, forKey: "pauseOnHover") } }
     var countdownEnabled: Bool { didSet { defaults.set(countdownEnabled, forKey: "countdownEnabled") } }
     var startOnFirstWords: Bool { didSet { defaults.set(startOnFirstWords, forKey: "startOnFirstWords") } }
     var controlMode: ControlMode { didSet { defaults.set(controlMode.rawValue, forKey: "controlMode") } }
-    var holdSpeed: Double { didSet { store(&holdSpeed, "holdSpeed", Self.holdSpeedRange) } }
+    var middleButtonHold: Bool { didSet { defaults.set(middleButtonHold, forKey: "middleButtonHold") } }
+    var holdSpeed: Double { didSet { defaults.set(holdSpeed, forKey: "holdSpeed") } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        func double(_ key: String, _ fallback: Double) -> Double {
-            defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key)
+        func double(_ key: String, _ fallback: Double, _ range: ClosedRange<Double>) -> Double {
+            let value = defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key)
+            return min(max(value, range.lowerBound), range.upperBound)
         }
         func bool(_ key: String, _ fallback: Bool) -> Bool {
             defaults.object(forKey: key) == nil ? fallback : defaults.bool(forKey: key)
         }
         fontChoice = FontChoice(rawValue: defaults.string(forKey: "fontChoice") ?? "") ?? .system
-        fontSize = double("fontSize", 15)
-        lineSpacing = double("lineSpacing", 2)
-        letterSpacing = double("letterSpacing", 0)
+        fontSize = double("fontSize", 15, Self.fontSizeRange)
+        lineSpacing = double("lineSpacing", 2, Self.lineSpacingRange)
+        letterSpacing = double("letterSpacing", 0, Self.letterSpacingRange)
         fontWeight = FontWeightChoice(rawValue: defaults.string(forKey: "fontWeight") ?? "") ?? .regular
         textAlignment = TextAlignmentChoice(rawValue: defaults.string(forKey: "textAlignment") ?? "") ?? .left
-        panelWidth = double("panelWidth", 520)
-        panelHeight = double("panelHeight", 140)
+        panelWidth = double("panelWidth", 520, Self.widthRange)
+        panelHeight = double("panelHeight", 140, Self.heightRange)
         targetDisplayID = UInt32(clamping: defaults.integer(forKey: "targetDisplayID"))
         placement = PlacementMode(rawValue: defaults.string(forKey: "placement") ?? "") ?? .notch
         if let xy = defaults.array(forKey: "floatingOrigin") as? [Double], xy.count == 2 {
@@ -133,12 +135,13 @@ final class AppSettings {
         hideFromCapture = bool("hideFromCapture", true)
         showTimer = bool("showTimer", true)
         showPace = bool("showPace", true)
-        targetPace = double("targetPace", 150)
+        targetPace = double("targetPace", 150, Self.targetPaceRange)
         pauseOnHover = bool("pauseOnHover", true)
         countdownEnabled = bool("countdownEnabled", true)
         startOnFirstWords = bool("startOnFirstWords", false)
         controlMode = ControlMode(rawValue: defaults.string(forKey: "controlMode") ?? "") ?? .voice
-        holdSpeed = double("holdSpeed", 140)
+        middleButtonHold = bool("middleButtonHold", true)
+        holdSpeed = double("holdSpeed", 140, Self.holdSpeedRange)
     }
 
     var sessionOptions: SessionOptions {
@@ -146,9 +149,4 @@ final class AppSettings {
                        mode: controlMode, holdWordsPerMinute: holdSpeed)
     }
 
-    private func store(_ value: inout Double, _ key: String, _ range: ClosedRange<Double>) {
-        let clamped = min(max(value, range.lowerBound), range.upperBound)
-        if clamped != value { value = clamped }
-        defaults.set(clamped, forKey: key)
-    }
 }

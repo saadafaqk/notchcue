@@ -8,5 +8,6 @@ let package = Package(
         .target(name: "CueCore"),
         .executableTarget(name: "NotchCue", dependencies: ["CueCore"]),
         .testTarget(name: "CueCoreTests", dependencies: ["CueCore"]),
+        .testTarget(name: "NotchCueTests", dependencies: ["NotchCue"]),
     ]
 )

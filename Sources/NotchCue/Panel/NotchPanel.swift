@@ -45,6 +45,10 @@ final class PanelController: NSObject {
         panel.contentView = content
         content.onHover = { [weak self] inside in self?.hover(inside) }
         content.onAction = { [weak self] in self?.performAction() }
+        content.onRestart = { [weak self] in
+            guard let self else { return }
+            Task { await self.session.restart() }
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(panelMoved),
@@ -56,17 +60,18 @@ final class PanelController: NSObject {
 
     func show() {
         applyAppearance()
-        let target = targetGeometry().frame
-        guard !isShown else { panel.setFrame(target, display: true); return }
+        let geometry = targetGeometry()
+        guard !isShown else { panel.setFrame(geometry.frame, display: true); return }
         isShown = true
-        let slides = settings.placement == .notch
-        panel.setFrame(slides ? target.offsetBy(dx: 0, dy: target.height + 4) : target, display: false)
-        panel.alphaValue = slides ? 1 : 0
+        // Grow down out of the notch (or the top edge). Starting inside the target screen means the
+        // panel never flashes on a display arranged above this one.
+        panel.setFrame(geometry.collapsedFrame, display: false)
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.25
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrame(target, display: true)
+            panel.animator().setFrame(geometry.frame, display: true)
             panel.animator().alphaValue = 1
         }
         startDisplayLink()
@@ -76,13 +81,12 @@ final class PanelController: NSObject {
         guard isShown else { return }
         isShown = false
         stopDisplayLink()
-        let frame = panel.frame
-        let slides = settings.placement == .notch
+        let collapsed = targetGeometry().collapsedFrame
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.25
+            context.duration = 0.2
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            if slides { panel.animator().setFrame(frame.offsetBy(dx: 0, dy: frame.height + 4), display: true) }
-            panel.animator().alphaValue = slides ? 1 : 0
+            panel.animator().setFrame(collapsed, display: true)
+            panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.isShown else { return }
@@ -126,6 +130,7 @@ final class PanelController: NSObject {
             hud.paceRushing = PaceMeter.isRushing(wpm: wpm, target: settings.targetPace)
         }
         if settings.showTimer { hud.timer = Self.clock(session.elapsed) }
+        hud.statusSymbol = Self.statusSymbol(for: session)
         switch session.state {
         case .countingDown(let n): hud.countdown = n
         case .waitingForFirstWords: hud.caption = "Start reading when you’re ready"
@@ -150,18 +155,12 @@ final class PanelController: NSObject {
         panel.sharingType = settings.hideFromCapture ? .none : .readOnly
         let geometry = targetGeometry()
         content.bandSize = geometry.bandSize
+        content.notchWidth = geometry.notchWidth
         content.roundTopCorners = settings.placement == .topLeft || settings.placement == .topRight
             || settings.placement == .floating
-        content.bodyColor = settings.theme.background
         panel.isMovableByWindowBackground = settings.placement == .floating
         if isShown { panel.setFrame(geometry.frame, display: true) }
-        content.layoutSubtreeIfNeeded()
-        let font = Fonts.font(settings.fontChoice, size: settings.fontSize, weight: settings.fontWeight.weight)
-        content.textView.setScript(session.script, font: font, lineSpacing: settings.lineSpacing,
-                                   letterSpacing: settings.letterSpacing,
-                                   alignment: settings.textAlignment.alignment,
-                                   textColor: settings.theme.text, background: settings.theme.background)
-        content.textView.setCurrentWord(session.currentWordIndex, animated: false)
+        content.applyStyle(settings, script: session.script, currentWord: session.currentWordIndex)
         shownScriptText = session.script.text
     }
 
@@ -239,6 +238,19 @@ final class PanelController: NSObject {
             NSWorkspace.shared.open(url)
         case nil:
             break
+        }
+    }
+
+    static func statusSymbol(for session: PrompterSession) -> String? {
+        if session.isHolding { return "hand.point.down.fill" }
+        switch session.state {
+        case .running: return session.options.mode == .voice ? "waveform" : "hand.point.down"
+        case .waitingForFirstWords: return "mic.fill"
+        case .countingDown: return "timer"
+        case .paused: return "pause.fill"
+        case .finished: return "checkmark"
+        case .error: return "exclamationmark.triangle.fill"
+        case .idle: return nil
         }
     }
 
