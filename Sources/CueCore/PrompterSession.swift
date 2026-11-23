@@ -187,8 +187,10 @@ public final class PrompterSession {
                 listenTask = Task { [weak self] in
                     do {
                         for try await event in stream { await self?.receive(event) }
+                    } catch is CancellationError {
+                        // Stopping the source cancels its stream; that's a normal end, not a failure.
                     } catch {
-                        self?.fail(error)
+                        if !Task.isCancelled { self?.fail(error) }
                     }
                 }
             } catch {

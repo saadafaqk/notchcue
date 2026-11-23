@@ -1,186 +1,45 @@
-// Task 1 spike: proves app bundle permissions, live on-device transcription,
-// contextual strings, model install, Carbon hold-key events and capture hiding.
+// Task 6 harness: real AnalyzerSource + PrompterSession on the sample script, logging the position.
 // Replaced by NotchCueApp.swift in Task 8.
 import AppKit
-import AVFoundation
-import Carbon.HIToolbox
+import CueCore
 import OSLog
-import Speech
 
-let log = Logger(subsystem: "com.local.notchcue", category: "spike")
-
-/// Audio-thread pipe: owns the engine tap and converts to the analyzer's format.
-/// Uses AVAudioConverter (macOS 26) rather than AnalyzerInputConverter (macOS 27+).
-/// Rebuilds the tap when the audio route changes (e.g. Bluetooth headset disconnects).
-final class MicPipe: @unchecked Sendable {
-    private let engine = AVAudioEngine()
-    private var analyzerFormat: AVAudioFormat?
-    private var continuation: AsyncStream<AnalyzerInput>.Continuation?
-    private var observer: NSObjectProtocol?
-
-    func start(analyzerFormat: AVAudioFormat, into continuation: AsyncStream<AnalyzerInput>.Continuation) throws {
-        self.analyzerFormat = analyzerFormat
-        self.continuation = continuation
-        observer = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-        ) { [weak self] _ in
-            log.info("audio configuration changed — restarting input")
-            do { try self?.restart() } catch {
-                log.error("restart failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-        try restart()
-    }
-
-    private func restart() throws {
-        guard let analyzerFormat, let continuation else { return }
-        engine.stop()
-        let input = engine.inputNode
-        input.removeTap(onBus: 0)
-        let inputFormat = input.outputFormat(forBus: 0)
-        log.info("input format: \(inputFormat, privacy: .public)")
-        guard inputFormat.sampleRate > 0,
-              let converter = AVAudioConverter(from: inputFormat, to: analyzerFormat) else {
-            throw NSError(domain: "NotchCue", code: 1, userInfo: [NSLocalizedDescriptionKey: "No converter \(inputFormat) → \(analyzerFormat)"])
-        }
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
-            let ratio = analyzerFormat.sampleRate / inputFormat.sampleRate
-            let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 16
-            guard let out = AVAudioPCMBuffer(pcmFormat: analyzerFormat, frameCapacity: capacity) else { return }
-            var consumed = false
-            var error: NSError?
-            converter.convert(to: out, error: &error) { _, status in
-                if consumed { status.pointee = .noDataNow; return nil }
-                consumed = true
-                status.pointee = .haveData
-                return buffer
-            }
-            if let error { log.error("convert failed: \(error.localizedDescription, privacy: .public)"); return }
-            if out.frameLength > 0 { continuation.yield(AnalyzerInput(buffer: out)) }
-        }
-        engine.prepare()
-        try engine.start()
-    }
-}
-
-/// The callback arrives on a background queue, so this must not inherit main-actor isolation.
-nonisolated func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
-    await withCheckedContinuation { cont in
-        SFSpeechRecognizer.requestAuthorization { @Sendable status in cont.resume(returning: status) }
-    }
-}
+let harnessLog = Logger(subsystem: "com.local.notchcue", category: "harness")
+let sampleScript = "This is NotchCue. [Pause] It's a tiny Mac app that hides your script right inside your camera notch, so you can look at the lens while you talk. See the difference? Thank you for watching."
 
 @MainActor
-final class SpikeDelegate: NSObject, NSApplicationDelegate {
-    private var panel: NSPanel?
-    private let mic = MicPipe()
-    private var hotKeyRef: EventHotKeyRef?
+final class HarnessDelegate: NSObject, NSApplicationDelegate {
+    private let session = PrompterSession(source: AnalyzerSource())
+    private var lastIndex = -1
+    private var lastState = ""
+    private var timer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        showPanel()
-        registerHoldKey()
-        Task { await runSpeech() }
-    }
-
-    private func showPanel() {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main else { return }
-        let size = CGSize(width: 520, height: 140)
-        let frame = CGRect(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height,
-                           width: size.width, height: size.height)
-        let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
-                            backing: .buffered, defer: false)
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.backgroundColor = .black
-        panel.hasShadow = false
-        panel.sharingType = .none
-        let label = NSTextField(labelWithString: "CAPTURE TEST")
-        label.font = .systemFont(ofSize: 30, weight: .bold)
-        label.textColor = .white
-        label.frame = CGRect(x: 20, y: 20, width: 480, height: 44)
-        panel.contentView?.addSubview(label)
-        panel.orderFrontRegardless()
-        self.panel = panel
-        log.info("panel shown, sharingType=none, safeAreaTop=\(screen.safeAreaInsets.top)")
-    }
-
-    private func registerHoldKey() {
-        var specs = [
-            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
-            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
-        ]
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
-            let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
-            log.info("hotkey \(pressed ? "pressed" : "released", privacy: .public) t=\(Date().timeIntervalSince1970)")
-            return noErr
-        }, 2, &specs, nil, nil)
-        let id = EventHotKeyID(signature: OSType(0x4E43_4B59), id: 1)
-        let status = RegisterEventHotKey(UInt32(kVK_DownArrow), UInt32(controlKey | optionKey | cmdKey), id,
-                                         GetApplicationEventTarget(), 0, &hotKeyRef)
-        log.info("register ctrl-opt-cmd-down status=\(status)")
-    }
-
-    private func runSpeech() async {
-        guard await AVCaptureDevice.requestAccess(for: .audio) else {
-            log.error("microphone denied"); return
+        session.options = SessionOptions(countdownSeconds: 0)
+        session.load(sampleScript)
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.report() }
         }
-        let auth = await requestSpeechAuthorization()
-        log.info("speech auth=\(auth.rawValue)")
+        Task { await session.start() }
+    }
 
-        let english = await SpeechTranscriber.supportedLocales.filter { $0.language.languageCode == .english }
-        log.info("english locales: \(english.map(\.identifier).joined(separator: ","), privacy: .public)")
-        let regional = Locale(identifier: "en-\(Locale.current.region?.identifier ?? "US")")
-        let locale = await SpeechTranscriber.supportedLocale(equivalentTo: regional)
-            ?? Locale(identifier: "en-US")
-        log.info("using locale \(locale.identifier, privacy: .public)")
-
-        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [],
-                                            reportingOptions: [.volatileResults, .fastResults], attributeOptions: [])
-        let status = await AssetInventory.status(forModules: [transcriber])
-        log.info("asset status=\(String(describing: status), privacy: .public)")
-        do {
-            if status != .installed, let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-                log.info("installing model…")
-                try await request.downloadAndInstall()
-                log.info("model installed")
-            }
-
-            let analyzer = SpeechAnalyzer(modules: [transcriber])
-            if let vocab = UserDefaults.standard.string(forKey: "spikeVocab"), !vocab.isEmpty {
-                let context = AnalysisContext()
-                context.contextualStrings[.general] = vocab.split(separator: ",").map(String.init)
-                try await analyzer.setContext(context)
-                log.info("contextual strings: \(vocab, privacy: .public)")
-            } else {
-                log.info("contextual strings: none")
-            }
-
-            guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
-                log.error("no analyzer audio format"); return
-            }
-            log.info("analyzer format: \(analyzerFormat, privacy: .public)")
-            let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-            try mic.start(analyzerFormat: analyzerFormat, into: continuation)
-
-            Task.detached {
-                do {
-                    for try await result in transcriber.results {
-                        let text = String(result.text.characters)
-                        log.info("\(result.isFinal ? "FINAL" : "vol", privacy: .public) t=\(Date().timeIntervalSince1970) \(text, privacy: .public)")
-                    }
-                } catch {
-                    log.error("results error: \(error.localizedDescription, privacy: .public)")
-                }
-            }
-            _ = try await analyzer.analyzeSequence(stream)
-        } catch {
-            log.error("speech error: \(error.localizedDescription, privacy: .public)")
+    private func report() {
+        session.tick()
+        let state = String(describing: session.state)
+        if state != lastState {
+            lastState = state
+            harnessLog.info("state \(state, privacy: .public)")
         }
+        guard session.currentWordIndex != lastIndex else { return }
+        lastIndex = session.currentWordIndex
+        let words = session.script.words
+        let next = lastIndex < words.count ? (session.script.text as NSString).substring(with: words[lastIndex].range) : "<end>"
+        harnessLog.info("index \(self.lastIndex) next=\(next, privacy: .public) wpm=\(self.session.wordsPerMinute ?? 0)")
     }
 }
 
 let app = NSApplication.shared
-let delegate = SpikeDelegate()
+let delegate = HarnessDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()

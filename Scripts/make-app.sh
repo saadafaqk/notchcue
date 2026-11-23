@@ -11,9 +11,11 @@ APP=build/NotchCue.app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/NotchCue"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-if [[ -d Resources/Fonts ]] && [[ -n "$(ls -A Resources/Fonts 2>/dev/null)" ]]; then
-  mkdir -p "$APP/Contents/Resources/Fonts"
-  cp Resources/Fonts/* "$APP/Contents/Resources/Fonts/"
+# Bundle fonts (any depth under Resources/Fonts) flat, plus their licence files.
+mkdir -p "$APP/Contents/Resources/Fonts"
+if [[ -d Resources/Fonts ]]; then
+  find Resources/Fonts -type f \( -name '*.otf' -o -name '*.ttf' -o -iname 'OFL*' -o -iname 'LICENSE*' \) \
+    -exec cp {} "$APP/Contents/Resources/Fonts/" \;
 fi
 
 codesign --force --sign "${NOTCHCUE_SIGN_ID:--}" "$APP"

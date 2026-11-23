@@ -14,11 +14,14 @@ private final class FakeSource: TranscriptSource, @unchecked Sendable {
     var stopCalls = 0
     var vocabulary: [String] = []
     var error: Error?
+    /// When set, the returned stream ends by throwing this (e.g. CancellationError on stop).
+    var streamError: Error?
 
     func events(vocabulary: [String]) async throws -> AsyncThrowingStream<TranscriptEvent, Error> {
         eventsCalls += 1
         self.vocabulary = vocabulary
         if let error { throw error }
+        if let streamError { return AsyncThrowingStream { $0.finish(throwing: streamError) } }
         return AsyncThrowingStream { _ in }
     }
 
@@ -225,4 +228,20 @@ private final class Harness {
     }
     #expect(h.session.wordsPerMinute == 150)
     #expect(abs((h.session.timeLeft ?? -1) - 0.8) < 0.001) // 2 words left at 150 wpm
+}
+
+@MainActor @Test func streamCancellationIsNotAnError() async {
+    let h = Harness()
+    h.source.streamError = CancellationError()
+    await h.session.start()
+    for _ in 0..<20 { await Task.yield() }
+    #expect(h.session.state == .running)
+}
+
+@MainActor @Test func streamFailureIsAnError() async {
+    let h = Harness()
+    h.source.streamError = FakeError()
+    await h.session.start()
+    for _ in 0..<20 { await Task.yield() }
+    #expect(h.session.state == .error("Microphone access denied"))
 }
