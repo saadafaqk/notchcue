@@ -103,6 +103,25 @@ final class AppModel {
     func hidePanel() {
         panel?.hide()
         panelShown = false
+        // A hidden prompter can't be read, so the take pauses (and the mic is released after the grace period).
+        if session.state == .running || session.state == .waitingForFirstWords {
+            Task { await session.pause() }
+        }
+    }
+
+    /// Ends the take and frees the microphone straight away.
+    func stop() {
+        Task {
+            await session.stop()
+            hidePanel()
+        }
+    }
+
+    var canStop: Bool {
+        switch session.state {
+        case .running, .paused, .waitingForFirstWords, .countingDown: true
+        default: false
+        }
     }
 
     // MARK: Shortcuts

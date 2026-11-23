@@ -59,6 +59,7 @@ public final class PrompterSession {
     @ObservationIgnored private var isStarting = false
     /// Hold intent, recorded before any await so a release during a slow start is never lost.
     @ObservationIgnored private var holdRequested = false
+    @ObservationIgnored private var releaseTask: Task<Void, Never>?
 
     /// Prediction: between recognizer updates the position keeps moving at the reader's pace,
     /// at most `predictionMaxLead` words ahead and only for `predictionWindow` seconds after an update.
@@ -69,6 +70,8 @@ public final class PrompterSession {
     public static let endSilenceTimeout = 3.0
     /// How far into the script "the first words" may be matched while waiting to start.
     public static let openingLookahead = 4
+    /// How long a pause keeps the microphone open before releasing it.
+    public static let pauseMicGrace: Duration = .seconds(10)
     public nonisolated static let stoppedListeningMessage = "NotchCue stopped listening. Press Start to try again."
 
     public init(source: TranscriptSource,
@@ -143,16 +146,52 @@ public final class PrompterSession {
             accumulate()
             resumeState = state
             state = .paused
+            scheduleMicRelease()
         default:
             break
         }
     }
 
-    /// Back to where it was, without replaying the countdown.
+    /// Back to where it was, without replaying the countdown. Re-opens the mic if the pause released it.
     public func resume() async {
         guard state == .paused else { return }
+        releaseTask?.cancel()
+        releaseTask = nil
+        if options.mode == .voice, !isListening {
+            generation += 1
+            let mine = generation
+            guard await openListening(generation: mine), state == .paused else { return }
+            finalizedTail = []
+        }
         lastTick = now()
         state = resumeState
+    }
+
+    /// Ends the take now: the mic is released and the next Start begins from the top.
+    public func stop() async {
+        generation += 1
+        isStarting = false
+        releaseTask?.cancel()
+        releaseTask = nil
+        isHolding = false
+        holdRequested = false
+        await stopListeningAndWait()
+        aligner.reset(to: 0)
+        resetProgress()
+        state = .idle
+    }
+
+    /// A short pause (hovering, a breath) keeps the mic warm; a longer one releases it, so the
+    /// microphone indicator never stays on while nothing is being read.
+    private func scheduleMicRelease() {
+        guard isListening else { return }
+        releaseTask?.cancel()
+        let sleep = sleep
+        releaseTask = Task { [weak self] in
+            await sleep(Self.pauseMicGrace)
+            guard !Task.isCancelled, let self, self.state == .paused else { return }
+            await self.stopListeningAndWait()
+        }
     }
 
     public func toggle() async {
@@ -163,6 +202,7 @@ public final class PrompterSession {
         case .countingDown: break
         }
     }
+
 
     public func restart() async {
         aligner.reset(to: 0)
@@ -279,31 +319,37 @@ public final class PrompterSession {
             guard generation == mine else { return }
         }
         if options.mode == .voice {
-            do {
-                let stream = try await source.events(vocabulary: Vocabulary.terms(in: script))
-                guard generation == mine else { await source.stop(); return }
-                isListening = true
-                listenTask = Task { [weak self] in
-                    do {
-                        for try await event in stream { await self?.receive(event) }
-                        // Ended without an error: still not "running" if nothing is listening any more.
-                        if !Task.isCancelled { self?.listeningEndedUnexpectedly() }
-                    } catch is CancellationError {
-                        // Stopping the source cancels its stream; that's a normal end, not a failure.
-                    } catch {
-                        if !Task.isCancelled { self?.fail(error) }
-                    }
-                }
-            } catch {
-                guard generation == mine else { return }
-                fail(error)
-                return
-            }
+            guard await openListening(generation: mine) else { return }
         }
         lastTick = now()
         pace.record(position: Int(spokenPosition), at: elapsed)
         state = options.mode == .voice && options.startOnFirstWords && spokenPosition == 0
             ? .waitingForFirstWords : .running
+    }
+
+    /// Opens the speech stream and starts consuming it. False if the start was superseded or failed.
+    private func openListening(generation mine: Int) async -> Bool {
+        do {
+            let stream = try await source.events(vocabulary: Vocabulary.terms(in: script))
+            guard generation == mine else { await source.stop(); return false }
+            isListening = true
+            listenTask = Task { [weak self] in
+                do {
+                    for try await event in stream { await self?.receive(event) }
+                    // Ended without an error: still not "running" if nothing is listening any more.
+                    if !Task.isCancelled { self?.listeningEndedUnexpectedly() }
+                } catch is CancellationError {
+                    // Stopping the source cancels its stream; that's a normal end, not a failure.
+                } catch {
+                    if !Task.isCancelled { self?.fail(error) }
+                }
+            }
+            return true
+        } catch {
+            guard generation == mine else { return false }
+            fail(error)
+            return false
+        }
     }
 
     private struct StoppedListening: LocalizedError {

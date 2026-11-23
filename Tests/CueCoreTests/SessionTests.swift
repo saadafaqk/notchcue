@@ -437,3 +437,62 @@ private final class Harness {
     for _ in 0..<20 { await Task.yield() }
     #expect(h.session.state == .error(PrompterSession.stoppedListeningMessage))
 }
+
+// MARK: Microphone lifecycle (security review #2)
+
+@MainActor @Test func pauseReleasesTheMicAfterTheGracePeriod() async {
+    let h = Harness()                                  // harness sleep returns at once: grace elapses immediately
+    await h.session.start()
+    await h.session.pause()
+    for _ in 0..<20 { await Task.yield() }
+    #expect(h.source.stopCalls == 1)
+    #expect(h.session.state == .paused)
+}
+
+@MainActor @Test func quickResumeKeepsTheMicOpen() async throws {
+    let h = Harness(realSleep: .milliseconds(200))
+    await h.session.start()
+    await h.say("this is notchcue", final: true)
+    await h.session.pause()
+    await h.session.resume()
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(h.source.stopCalls == 0)
+    #expect(h.source.eventsCalls == 1)
+    #expect(h.session.state == .running)
+}
+
+@MainActor @Test func resumeAfterReleaseReopensTheMicAtTheSamePlace() async {
+    let h = Harness()
+    await h.session.start()
+    await h.say("this is notchcue", final: true)
+    await h.session.pause()
+    for _ in 0..<20 { await Task.yield() }
+    await h.session.resume()
+    #expect(h.source.eventsCalls == 2)
+    #expect(h.session.state == .running)
+    #expect(h.session.spokenPosition == 3)
+    await h.say("its a")
+    #expect(h.session.spokenPosition == 5)
+}
+
+@MainActor @Test func stopEndsTheTakeAndFreesTheMic() async {
+    let h = Harness()
+    await h.session.start()
+    await h.say("this is notchcue", final: true)
+    await h.session.stop()
+    #expect(h.session.state == .idle)
+    #expect(h.source.stopCalls == 1)
+    #expect(h.session.spokenPosition == 0)
+    await h.say("its a")
+    #expect(h.session.spokenPosition == 0)
+}
+
+@MainActor @Test func holdModePauseNeverTouchesTheMic() async {
+    let h = Harness(mode: .hold)
+    await h.session.start()
+    await h.session.pause()
+    for _ in 0..<20 { await Task.yield() }
+    await h.session.resume()
+    #expect(h.source.eventsCalls == 0)
+    #expect(h.source.stopCalls == 0)
+}

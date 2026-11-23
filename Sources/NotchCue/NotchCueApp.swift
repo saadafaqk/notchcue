@@ -29,6 +29,8 @@ private struct MenuContent: View {
     var body: some View {
         Button(model.isActive ? "Pause Prompting" : "Start Prompting") { model.toggle() }
             .keyboardShortcut("p", modifiers: [.control, .option, .command])
+        Button("Stop Prompting") { model.stop() }
+            .disabled(!model.canStop)
         Button("Restart from Beginning") { model.restart() }
             .keyboardShortcut("r", modifiers: [.control, .option, .command])
         Button(model.panelShown ? "Hide Prompter" : "Show Prompter") { model.toggleVisibility() }
