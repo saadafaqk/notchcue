@@ -77,9 +77,19 @@ final class AnalyzerSource: TranscriptSource, @unchecked Sendable {
     }
 
     /// Downloads the on-device English model. The app's only network use, and only on the user's click.
-    static func installModel() async throws {
+    /// `progress` receives 0…1 on the main actor while the download runs.
+    static func installModel(progress: @escaping @MainActor (Double) -> Void) async throws {
         let transcriber = await makeTranscriber()
-        try await AssetInventory.assetInstallationRequest(supporting: [transcriber])?.downloadAndInstall()
+        guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else { return }
+        let watcher = Task { @MainActor in
+            while !Task.isCancelled {
+                progress(request.progress.fractionCompleted)
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
+        defer { watcher.cancel() }
+        try await request.downloadAndInstall()
+        await progress(1)
     }
 
     // MARK: Helpers

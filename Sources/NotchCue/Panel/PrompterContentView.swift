@@ -19,6 +19,8 @@ final class PrompterContentView: NSView {
     private let progressTrack = NSView()
     private let progressFill = NSView()
     private let restartButton = NSButton()
+    private let closeButton = NSButton()
+    private let downloadBar = NSProgressIndicator()
 
     var bandSize: CGSize = .zero { didSet { needsLayout = true; needsDisplay = true } }
     var notchWidth: CGFloat = 0 { didSet { needsLayout = true } }
@@ -27,6 +29,7 @@ final class PrompterContentView: NSView {
     var onHover: ((Bool) -> Void)?
     var onAction: (() -> Void)?
     var onRestart: (() -> Void)?
+    var onClose: (() -> Void)?
 
     static let cornerRadius: CGFloat = 14
     private static let hudHeight: CGFloat = 18
@@ -66,7 +69,18 @@ final class PrompterContentView: NSView {
         restartButton.toolTip = "Restart from Beginning"
         restartButton.target = self
         restartButton.action = #selector(restartTapped)
-        [textView, progressTrack, statusIcon, paceLabel, timerLabel, ringHost, restartButton,
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Stop Prompting")
+        closeButton.symbolConfiguration = .init(pointSize: 10, weight: .bold)
+        closeButton.isBordered = false
+        closeButton.toolTip = "Stop Prompting"
+        closeButton.target = self
+        closeButton.action = #selector(closeTapped)
+        downloadBar.style = .bar
+        downloadBar.controlSize = .small
+        downloadBar.minValue = 0
+        downloadBar.maxValue = 1
+        downloadBar.isHidden = true
+        [textView, progressTrack, statusIcon, paceLabel, timerLabel, ringHost, restartButton, closeButton, downloadBar,
          centerLabel, messageLabel, actionButton].forEach(addSubview)
     }
 
@@ -118,9 +132,10 @@ final class PrompterContentView: NSView {
             let midY = b.maxY + bandSize.height / 2
             statusIcon.frame = CGRect(x: 16, y: midY - 7, width: 14, height: 14)
             paceLabel.frame = CGRect(x: 34, y: midY - 7, width: max(0, earWidth - 34), height: 14)
-            restartButton.frame = CGRect(x: bounds.width - 16 - 16, y: midY - 8, width: 16, height: 16)
-            ringHost.frame = CGRect(x: bounds.width - 16 - 16 - 8 - 14, y: midY - 7, width: 14, height: 14)
-            timerLabel.frame = CGRect(x: bounds.width - earWidth, y: midY - 7, width: max(0, earWidth - 58), height: 14)
+            closeButton.frame = CGRect(x: bounds.width - 16 - 16, y: midY - 8, width: 16, height: 16)
+            restartButton.frame = CGRect(x: bounds.width - 16 - 16 - 6 - 16, y: midY - 8, width: 16, height: 16)
+            ringHost.frame = CGRect(x: bounds.width - 16 - 16 - 6 - 16 - 8 - 14, y: midY - 7, width: 14, height: 14)
+            timerLabel.frame = CGRect(x: bounds.width - earWidth, y: midY - 7, width: max(0, earWidth - 80), height: 14)
         } else {
             textView.frame = CGRect(x: 0, y: Self.hudHeight, width: b.width, height: max(0, b.height - Self.hudHeight))
             progressTrack.isHidden = false
@@ -128,8 +143,9 @@ final class PrompterContentView: NSView {
             statusIcon.frame = CGRect(x: r, y: 3, width: 12, height: 12)
             paceLabel.frame = CGRect(x: r + 16, y: 3, width: b.width / 2 - r - 16, height: 13)
             ringHost.frame = .zero
-            restartButton.frame = CGRect(x: b.width - r - 14, y: 2, width: 14, height: 14)
-            timerLabel.frame = CGRect(x: b.width / 2, y: 3, width: b.width / 2 - r - 20, height: 13)
+            closeButton.frame = CGRect(x: b.width - r - 14, y: 2, width: 14, height: 14)
+            restartButton.frame = CGRect(x: b.width - r - 14 - 6 - 14, y: 2, width: 14, height: 14)
+            timerLabel.frame = CGRect(x: b.width / 2, y: 3, width: b.width / 2 - r - 40, height: 13)
         }
         // Starts at 12 o'clock and fills clockwise (y-up coordinates, so angles decrease).
         let center = CGPoint(x: ringHost.bounds.midX, y: ringHost.bounds.midY)
@@ -140,6 +156,7 @@ final class PrompterContentView: NSView {
         ring.path = ringPath
         centerLabel.frame = CGRect(x: 0, y: b.midY - 24, width: b.width, height: 48)
         messageLabel.frame = CGRect(x: 20, y: b.midY - 4, width: b.width - 40, height: 40)
+        downloadBar.frame = CGRect(x: b.midX - 110, y: b.midY - 26, width: 220, height: 12)
         actionButton.sizeToFit()
         actionButton.frame.origin = CGPoint(x: b.midX - actionButton.frame.width / 2, y: b.midY - 34)
         trackingAreas.forEach(removeTrackingArea)
@@ -153,6 +170,7 @@ final class PrompterContentView: NSView {
 
     @objc private func actionTapped() { onAction?() }
     @objc private func restartTapped() { onRestart?() }
+    @objc private func closeTapped() { onClose?() }
 
     // MARK: HUD
 
@@ -168,6 +186,8 @@ final class PrompterContentView: NSView {
         var caption: String?
         var message: String?
         var actionTitle: String?
+        /// 0…1 while a speech-model download runs; nil hides the bar.
+        var downloadProgress: Double?
     }
 
     func apply(_ hud: HUD) {
@@ -178,6 +198,18 @@ final class PrompterContentView: NSView {
         timerLabel.stringValue = hud.timer ?? ""
         timerLabel.textColor = statusColor.withAlphaComponent(0.7)
         restartButton.contentTintColor = statusColor.withAlphaComponent(0.7)
+        closeButton.contentTintColor = statusColor.withAlphaComponent(0.7)
+        if let fraction = hud.downloadProgress {
+            downloadBar.isHidden = false
+            downloadBar.isIndeterminate = fraction <= 0
+            if fraction <= 0 { downloadBar.startAnimation(nil) } else {
+                downloadBar.stopAnimation(nil)
+                downloadBar.doubleValue = fraction
+            }
+        } else {
+            downloadBar.isHidden = true
+            downloadBar.stopAnimation(nil)
+        }
         if let symbol = hud.statusSymbol {
             statusIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             statusIcon.contentTintColor = statusColor.withAlphaComponent(0.8)

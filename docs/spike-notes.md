@@ -51,3 +51,14 @@ Machine: MacBook Air, macOS 27, Xcode 27.2. Three displays; main display is an e
 
 ## Hold shortcut (⌃⌥⌘↓)
 - `RegisterEventHotKey` returned status 0, so it is unclaimed. Pressed/released timing wasn't exercised yet; it will be verified manually in Task 8, and the `CGEventSource.keyState` failsafe stays in the plan.
+
+# Urdu spike, 2026-11-23
+
+- **Locales:** `SpeechTranscriber.supportedLocales` includes `ur_IN` and `mul_IN`, but not `ur_PK`. `SFSpeechRecognizer` has no Urdu.
+- **Model install:** `ur_IN` showed `.supported` (not installed). The in-app Download appeared to hang or fail silently. A direct `assetInstallationRequest(supporting:)` → `downloadAndInstall()` worked at once, and the status went to `.installed`.
+- **Output script:** `ur_IN` writes **Roman Urdu in Latin letters**. English words come out in English ("Mac app", "script"). Updates arrive about every 1 s with `.fastResults`, as with English.
+- **Transcript of the Urdu passage, read aloud:** "Aslam hi kam aaj Nauj kyon ke bare mein baat karenge yeh ek choti si mein Mac app hai jo Aapka script camere ke paas Dikhaati Hai."
+  - Everyday words are accurate.
+  - The brand name ("NotchCue" → "Nauj kyon") and the greeting ("Assalam o alaikum" → "Aslam hi kam") are not.
+- **Decision:** use `ur_IN` for both Urdu modes. It already handles mixed English, so `mul_IN` isn't needed.
+- **Matching:** compare by phonetic (consonant) key. Map Urdu-script letters and Roman letters to the same consonant classes.

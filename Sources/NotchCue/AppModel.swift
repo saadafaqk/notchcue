@@ -57,6 +57,7 @@ final class AppModel {
     func launch() {
         Fonts.registerBundled()
         panel = PanelController(session: session, settings: settings)
+        panel?.onClose = { [weak self] in self?.stop() }
         hotkeys = Hotkeys { [weak self] action, pressed in self?.hotkey(action, pressed: pressed) }
         installMouseHold()
         observeSession()

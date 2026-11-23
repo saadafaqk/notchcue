@@ -37,6 +37,10 @@ final class PanelController: NSObject {
     private var shownScriptText: String?
     private var resumeAfterHover = false
     private var downloading = false
+    private var downloadProgress = 0.0
+    private var downloadFailed = false
+    /// Called by the prompter's × button: the app stops the take and hides the panel.
+    var onClose: (() -> Void)?
 
     init(session: PrompterSession, settings: AppSettings) {
         self.session = session
@@ -45,6 +49,7 @@ final class PanelController: NSObject {
         panel.contentView = content
         content.onHover = { [weak self] inside in self?.hover(inside) }
         content.onAction = { [weak self] in self?.performAction() }
+        content.onClose = { [weak self] in self?.onClose?() }
         content.onRestart = { [weak self] in
             guard let self else { return }
             Task { await self.session.restart() }
@@ -162,7 +167,13 @@ final class PanelController: NSObject {
         case .waitingForFirstWords: hud.caption = "Start reading when you’re ready"
         case .error(let message):
             if downloading {
-                hud.message = "Downloading English speech recognition…"
+                let percent = Int((downloadProgress * 100).rounded())
+                hud.message = percent > 0 ? "Downloading English speech recognition… \(percent)%"
+                                          : "Downloading English speech recognition…"
+                hud.downloadProgress = downloadProgress
+            } else if downloadFailed {
+                hud.message = "Couldn’t download speech recognition. Check your internet connection and try again."
+                hud.actionTitle = "Try Again"
             } else {
                 let error = SpeechError.matching(message)
                 hud.message = message
@@ -258,14 +269,19 @@ final class PanelController: NSObject {
         guard case .error(let message) = session.state, let error = SpeechError.matching(message) else { return }
         switch error.action {
         case .download:
+            guard !downloading else { return }
             downloading = true
+            downloadFailed = false
+            downloadProgress = 0
             Task {
                 do {
-                    try await AnalyzerSource.installModel()
+                    try await AnalyzerSource.installModel { fraction in self.downloadProgress = fraction }
                     downloading = false
                     await session.start()
                 } catch {
+                    speechLog.error("model download failed: \(error.localizedDescription, privacy: .public)")
                     downloading = false
+                    downloadFailed = true
                 }
             }
         case .openSettings(let url):
