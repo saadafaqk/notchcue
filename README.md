@@ -63,7 +63,11 @@ NotchCue is **100% offline**.
 
 ## Install
 
-Prebuilt releases are coming soon. For now, build from source:
+**[⬇ Download NotchCue for Mac](https://github.com/saadafaqk/notchcue/releases/latest)** (DMG; drag it into Applications).
+
+This build isn't notarised yet, so on first launch macOS blocks it. Open **System Settings › Privacy & Security** and click **Open Anyway**. The [release notes](https://github.com/saadafaqk/notchcue/releases/latest) list checksums and a Terminal alternative.
+
+### Build from source
 
 ```bash
 git clone https://github.com/saadafaqk/notchcue.git
@@ -111,6 +115,7 @@ swift test
 
 ## Roadmap
 
+- [x] Downloadable DMG ([releases](https://github.com/saadafaqk/notchcue/releases))
 - [ ] Signed, notarised releases and Homebrew cask
 - [ ] Sections with time budgets (`## Intro (0:30)`), with ahead/behind indicators
 - [ ] Missed-line report after each take
