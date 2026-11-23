@@ -1,0 +1,334 @@
+/* NotchCue at the top of a MacBook screen. Units are the stage's (1.15x points). */
+.nc {
+  .ss-stage {
+    overflow: hidden;
+    background: #10151c;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .nc-desk {
+    position: absolute;
+    inset: 0;
+  }
+
+  /* A quiet dark wallpaper: near-flat, one soft lift of slate blue low left */
+  .nc-wall {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(70% 90% at 18% 110%, #2a3a4e 0%, rgba(42, 58, 78, 0) 70%),
+      radial-gradient(60% 80% at 92% 100%, #1d2a33 0%, rgba(29, 42, 51, 0) 70%),
+      linear-gradient(180deg, #121821 0%, #151d27 100%);
+  }
+
+  /* ---- Menu bar ---- */
+  .nc-menubar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: rgba(255, 255, 255, 0.045);
+    color: #fff;
+  }
+
+  .nc-menubar__right svg { opacity: 0.85; }
+
+  .nc-menubar__left,
+  .nc-menubar__right {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .nc-menubar__right {
+    gap: 14px;
+  }
+
+  .nc-menubar__right svg {
+    flex: none;
+  }
+
+  .nc-menu {
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    color: rgba(255, 255, 255, 0.78);
+    white-space: nowrap;
+  }
+
+  .nc-menu--app {
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .nc-clock {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+
+  /* ---- The notch and the panel ---- */
+  .nc-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  .nc-notch,
+  .nc-shape {
+    position: absolute;
+    top: 0;
+    background: #000;
+  }
+
+  .nc-lens {
+    position: absolute;
+    z-index: 1;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #2b3442 0%, #111720 55%, #07090c 100%);
+    box-shadow: 0 0 0 1px #15191f;
+  }
+
+  .nc-shape {
+    will-change: left, width, height;
+    transition-property: left, width, height, border-radius;
+  }
+
+  /* Content: a layer of its own at its final positions, so nothing stretches.
+     Out fast; in once the shape is most of the way open (the app fades in
+     over 0.22s after a short delay). */
+  .nc-content {
+    position: absolute;
+    top: 0;
+    opacity: 0;
+    transition: opacity 0.12s ease-in;
+  }
+
+  .nc-content[data-on] {
+    opacity: 1;
+    transition: opacity 0.24s ease-out 0.2s;
+  }
+
+  .nc-ear {
+    position: absolute;
+    top: 0;
+    height: 37px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .nc-ear--left {
+    left: 0;
+    padding-left: 18px;
+  }
+
+  .nc-ear--right {
+    right: 0;
+    justify-content: flex-end;
+    gap: 9px;
+    padding-right: 18px;
+  }
+
+  .nc-glyph {
+    flex: none;
+    color: #fff;
+    opacity: 0.8;
+  }
+
+  .nc-ear--right .nc-glyph {
+    opacity: 0.7;
+  }
+
+  .nc-readout {
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .nc-ring {
+    flex: none;
+    transform: rotate(-90deg);
+  }
+
+  .nc-ring__track,
+  .nc-ring__arc {
+    fill: none;
+    stroke-width: 2.3;
+  }
+
+  .nc-ring__track {
+    stroke: #333;
+  }
+
+  .nc-ring__arc {
+    stroke: #d9d9d9;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
+  }
+
+  /* The body: script with soft fades at the top and bottom edges */
+  .nc-body {
+    position: absolute;
+    left: 0;
+    right: 0;
+    padding: 5px 16px 0;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 28px), transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0, #000 12px, #000 calc(100% - 28px), transparent 100%);
+  }
+
+  .nc-script {
+    margin: 0;
+    padding-top: 11px;
+    font-size: 17px;
+    line-height: 23px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    color: #fff;
+  }
+
+  .nc-word {
+    color: #fff;
+    transition: color 0.14s ease-out;
+  }
+
+  .nc-word[data-read] {
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .nc-word[data-cue] {
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* ---- The live caption: what the microphone hears ---- */
+  .nc-caption {
+    position: absolute;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    height: 36px;
+    box-sizing: border-box;
+    padding: 0 14px;
+    border-radius: 18px;
+    will-change: translate, opacity;
+    background: #2a2b2f;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 10px 24px -8px rgba(0, 0, 0, 0.6);
+    color: rgba(255, 255, 255, 0.9);
+    opacity: 0;
+    translate: 0 -6px;
+    transition: opacity 0.2s ease-in, translate 0.3s ease-in;
+  }
+
+  .nc-caption[data-on] {
+    opacity: 1;
+    translate: 0 0;
+    transition: opacity 0.45s ease-out, translate 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+  }
+
+
+
+  .nc-caption__mic {
+    flex: none;
+    margin-right: 10px;
+    color: #ff9f0a;
+  }
+
+  .nc-caption__line {
+    flex: none;
+    font-size: 14px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  .nc-heard {
+    display: flex;
+    /* Each word carries its trailing space; most of the last one's is taken back */
+    margin-right: -0.1em;
+  }
+
+  /* Clearing: the words fade, then their room closes. Arriving: the room
+     opens as the word sharpens in, its opacity trailing the edge. */
+  .nc-heard__w {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns 0.24s cubic-bezier(0.25, 0.8, 0.25, 1) 0.12s;
+  }
+
+  .nc-heard__w[data-on] {
+    grid-template-columns: 1fr;
+    transition-delay: 0s;
+  }
+
+  .nc-heard__clip {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .nc-heard__t {
+    display: block;
+    padding-right: 0.28em;
+    white-space: nowrap;
+    opacity: 0;
+    filter: blur(1.5px);
+    transition: opacity 0.12s ease-in, filter 0.12s ease-in;
+  }
+
+
+  .nc-heard__w[data-on] .nc-heard__t {
+    opacity: 1;
+    filter: none;
+    transition: opacity 0.22s ease-out 0.1s, filter 0.22s ease-out 0.1s;
+  }
+
+  .nc-caption__tagwrap {
+    display: grid;
+    grid-template-columns: 0fr;
+    /* Closing: the pill fades first, then its room closes */
+    transition: grid-template-columns 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) 0.16s;
+  }
+
+  .nc-caption__tagwrap[data-on] {
+    grid-template-columns: 1fr;
+  }
+
+  .nc-caption__tagclip {
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    padding: 1px 0;
+  }
+
+  .nc-caption__tag {
+    flex: none;
+    margin-left: 10px;
+    white-space: nowrap;
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 18px;
+    color: rgba(255, 255, 255, 0.62);
+    opacity: 0;
+    transition: opacity 0.14s ease;
+  }
+
+  .nc-caption__tagwrap[data-on] .nc-caption__tag {
+    opacity: 1;
+    transition: opacity 0.2s ease 0.3s;
+  }
+
+  .nc-caption__tagwrap[data-on] {
+    transition-delay: 0s;
+  }
+}
