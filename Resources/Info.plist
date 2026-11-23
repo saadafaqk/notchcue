@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.local.notchcue</string>
+	<key>CFBundleName</key>
+	<string>NotchCue</string>
+	<key>CFBundleDisplayName</key>
+	<string>NotchCue</string>
+	<key>CFBundleExecutable</key>
+	<string>NotchCue</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>NotchCue listens as you read so your script scrolls by itself. Audio stays on your Mac.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>NotchCue recognizes speech on your Mac to keep your place in the script.</string>
+</dict>
+</plist>
