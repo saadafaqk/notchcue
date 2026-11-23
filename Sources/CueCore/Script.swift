@@ -21,9 +21,15 @@ public struct Script: Sendable {
         self.text = text
         var words: [ScriptWord] = []
         var i = text.startIndex
+        // The next "]" at or after the scan position, found once and reused, so many unclosed "["
+        // stay linear instead of rescanning to the end each time.
+        var nextClose: String.Index? = text.firstIndex(of: "]")
         while i < text.endIndex {
             if text[i].isWhitespace { i = text.index(after: i); continue }
-            if text[i] == "[", let close = text[i...].firstIndex(of: "]") {
+            if let close = nextClose, close < i {
+                nextClose = text[i...].firstIndex(of: "]")
+            }
+            if text[i] == "[", let close = nextClose {
                 let end = text.index(after: close)
                 words.append(ScriptWord(range: NSRange(i..<end, in: text), isCue: true, spoken: []))
                 i = end

@@ -41,5 +41,26 @@ private func freshSettings() -> (AppSettings, UserDefaults) {
     #expect(AppModel.middleButtonMayHold(state: .running, panelShown: true))
     #expect(AppModel.middleButtonMayHold(state: .paused, panelShown: true))
     #expect(AppModel.middleButtonMayHold(state: .waitingForFirstWords, panelShown: true))
-    #expect(AppModel.middleButtonMayHold(state: .idle, panelShown: true))
+    // Security review #3: a visible-but-idle panel (e.g. the Appearance preview) must not let a
+    // browser middle-click start a voice take and the microphone.
+    #expect(!AppModel.middleButtonMayHold(state: .idle, panelShown: true))
+}
+
+/// Security review #6: an unreadable script file must not be silently replaced by the sample and then
+/// overwritten by the next autosave.
+@Test func unreadableScriptIsBackedUpNotLost() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let file = dir.appendingPathComponent("script.txt")
+    let garbage = Data([0xFF, 0xFE, 0x00, 0xC3, 0x28])
+    try garbage.write(to: file)
+    _ = ScriptStore.load(from: file)
+    let backups = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasPrefix("script-unreadable") }
+    try #require(backups.count == 1)
+    #expect(try Data(contentsOf: dir.appendingPathComponent(backups[0])) == garbage)
+}
+
+@Test func missingScriptLoadsTheSample() {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".txt")
+    #expect(ScriptStore.load(from: file) == ScriptStore.sample)
 }

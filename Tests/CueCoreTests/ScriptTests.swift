@@ -31,3 +31,12 @@ import Testing
 @Test func unclosedBracketIsPlainText() {
     #expect(Script("[oops no close").spoken == ["oops", "no", "close"])
 }
+
+/// Security review #5: unmatched "[" used to rescan to the end each time (quadratic; 160 KB took ~55 s at launch).
+@Test func manyUnclosedBracketsParseInLinearTime() {
+    let text = String(repeating: "[ ", count: 20_000)
+    let start = Date()
+    let script = Script(text)
+    #expect(Date().timeIntervalSince(start) < 0.5)
+    #expect(script.words.count == 20_000)
+}

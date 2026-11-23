@@ -61,12 +61,22 @@ private struct SidebarIcon: View {
 private struct CaptureShield: NSViewRepresentable {
     let hidden: Bool
 
-    func makeNSView(context: Context) -> NSView { NSView() }
+    func makeNSView(context: Context) -> ShieldView { ShieldView() }
 
-    func updateNSView(_ view: NSView, context: Context) {
-        DispatchQueue.main.async {
-            view.window?.sharingType = hidden ? .none : .readOnly
+    func updateNSView(_ view: ShieldView, context: Context) {
+        view.hideFromCapture = hidden
+    }
+
+    /// Sets the window's sharing type as soon as the view joins it, before the first frame is shown.
+    final class ShieldView: NSView {
+        var hideFromCapture = true { didSet { apply() } }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
         }
+
+        private func apply() { window?.sharingType = hideFromCapture ? .none : .readOnly }
     }
 }
 
@@ -84,6 +94,8 @@ private struct ScriptPage: View {
             Section {
                 TextEditor(text: $model.scriptText)
                     .font(.system(size: 14))
+                    // Writing Tools can send text off-device; NotchCue promises your script stays local.
+                    .writingToolsBehavior(.disabled)
                     .lineSpacing(3)
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 300)

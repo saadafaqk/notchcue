@@ -143,7 +143,7 @@ final class AppModel {
     static func middleButtonMayHold(state: PrompterState, panelShown: Bool) -> Bool {
         switch state {
         case .running, .paused, .waitingForFirstWords, .countingDown: true
-        default: panelShown
+        default: false
         }
     }
 

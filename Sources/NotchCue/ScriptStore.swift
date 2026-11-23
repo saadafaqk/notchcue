@@ -16,8 +16,23 @@ enum ScriptStore {
             .appendingPathComponent("script.txt")
     }
 
-    static func load() -> String {
-        (try? String(contentsOf: fileURL, encoding: .utf8)) ?? sample
+    static func load() -> String { load(from: fileURL) }
+
+    /// Missing file: the sample. A file that isn't valid UTF-8 is copied aside first, so the next autosave
+    /// can never overwrite the only copy of someone's script.
+    static func load(from url: URL) -> String {
+        guard FileManager.default.fileExists(atPath: url.path) else { return sample }
+        if let text = try? String(contentsOf: url, encoding: .utf8) { return text }
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let backup = url.deletingLastPathComponent().appendingPathComponent("script-unreadable-\(stamp).txt")
+        do {
+            try FileManager.default.copyItem(at: url, to: backup)
+            speechLog.error("script wasn't UTF-8; kept a copy as \(backup.lastPathComponent, privacy: .public)")
+        } catch {
+            speechLog.error("couldn't back up unreadable script: \(error.localizedDescription, privacy: .public)")
+        }
+        var encoding = String.Encoding.utf8
+        return (try? String(contentsOf: url, usedEncoding: &encoding)) ?? sample
     }
 
     static func save(_ text: String) {

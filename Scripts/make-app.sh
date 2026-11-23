@@ -8,6 +8,8 @@ swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/NotchCue"
 
 APP=build/NotchCue.app
+# Start from an empty bundle so nothing stale from an earlier build gets signed.
+rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/NotchCue"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
