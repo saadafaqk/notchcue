@@ -13,6 +13,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/NotchCue"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Bundle fonts (any depth under Resources/Fonts) flat, plus their licence files.
 mkdir -p "$APP/Contents/Resources/Fonts"
 if [[ -d Resources/Fonts ]]; then
