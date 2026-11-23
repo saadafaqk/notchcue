@@ -2,16 +2,23 @@ import AppKit
 import CueCore
 import SwiftUI
 
-/// System Settings–style window: a sidebar of pages, each a grouped Form.
+/// System Settings–style window: a sidebar of coloured icons, each page a grouped Form.
 struct SettingsView: View {
     @Bindable var model: AppModel
 
     var body: some View {
         NavigationSplitView {
             List(SettingsPage.allCases, selection: $model.settingsPage) { page in
-                Label(page.title, systemImage: page.symbol).tag(page)
+                Label {
+                    Text(page.title)
+                } icon: {
+                    SidebarIcon(symbol: page.symbol, color: page.color)
+                }
+                .tag(page)
             }
-            .navigationSplitViewColumnWidth(170)
+            .listStyle(.sidebar)
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 220)
         } detail: {
             Group {
                 switch model.settingsPage {
@@ -24,7 +31,9 @@ struct SettingsView: View {
             }
             .navigationTitle(model.settingsPage.title)
         }
-        .frame(minWidth: 640, minHeight: 460)
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 700, idealWidth: 740, minHeight: 500, idealHeight: 560)
+        .background(CaptureShield(hidden: model.settings.hideFromCapture))
         .onAppear {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
@@ -33,22 +42,78 @@ struct SettingsView: View {
     }
 }
 
+/// The white-on-colour rounded-square icons System Settings uses in its sidebar.
+private struct SidebarIcon: View {
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 20, height: 20)
+            .background(color.gradient, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+    }
+}
+
+/// Applies the capture setting to the Settings window too: it shows your script, so it mustn't
+/// appear in a screen share either.
+private struct CaptureShield: NSViewRepresentable {
+    let hidden: Bool
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            view.window?.sharingType = hidden ? .none : .readOnly
+        }
+    }
+}
+
 private struct ScriptPage: View {
     @Bindable var model: AppModel
 
+    private var wordCount: Int { model.session.script.spoken.count }
+    private var readingTime: String {
+        let seconds = Double(wordCount) / model.settings.targetPace * 60
+        return seconds < 60 ? "under a minute" : "about \(Int((seconds / 60).rounded())) min"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextEditor(text: $model.scriptText)
-                .font(.system(size: 14))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .background(.background, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
-            Text("Put cues like [Pause] or [Smile] in square brackets. NotchCue shows them but doesn’t wait for you to say them.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        Form {
+            Section {
+                TextEditor(text: $model.scriptText)
+                    .font(.system(size: 14))
+                    .lineSpacing(3)
+                    .scrollContentBackground(.hidden)
+                    .frame(minHeight: 300)
+                    .padding(.vertical, 4)
+            } header: {
+                HStack {
+                    Text("Your script")
+                    Spacer()
+                    Text("\(wordCount) words · \(readingTime) at \(Int(model.settings.targetPace)) wpm")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            } footer: {
+                Text("Put cues like [Pause] or [Smile] in square brackets. NotchCue shows them but doesn’t wait for you to say them.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding()
+        .formStyle(.grouped)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.toggle()
+                } label: {
+                    Label(model.isActive ? "Pause Prompting" : "Start Prompting",
+                          systemImage: model.isActive ? "pause.fill" : "play.fill")
+                }
+                .help("⌃⌥⌘P")
+            }
+        }
     }
 }
 

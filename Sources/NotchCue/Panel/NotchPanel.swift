@@ -63,17 +63,11 @@ final class PanelController: NSObject {
         let geometry = targetGeometry()
         guard !isShown else { panel.setFrame(geometry.frame, display: true); return }
         isShown = true
-        // Grow down out of the notch (or the top edge). Starting inside the target screen means the
-        // panel never flashes on a display arranged above this one.
-        panel.setFrame(geometry.collapsedFrame, display: false)
-        panel.alphaValue = 0
+        panel.setFrame(geometry.frame, display: true)
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrame(geometry.frame, display: true)
-            panel.animator().alphaValue = 1
-        }
+        content.layoutSubtreeIfNeeded()
+        animateOpen()
         startDisplayLink()
     }
 
@@ -81,18 +75,50 @@ final class PanelController: NSObject {
         guard isShown else { return }
         isShown = false
         stopDisplayLink()
-        let collapsed = targetGeometry().collapsedFrame
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().setFrame(collapsed, display: true)
-            panel.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, !self.isShown else { return }
-                self.panel.orderOut(nil)
-            }
-        })
+        animateClose { [weak self] in
+            guard let self, !self.isShown else { return }
+            self.panel.orderOut(nil)
+        }
+    }
+
+    // MARK: Open and close animation
+
+    /// The panel window is placed at its final frame (so it never strays onto another display) and a
+    /// mask morphs from the notch's own shape to the full panel with a spring, like the Dynamic Island.
+    private let reveal = CAShapeLayer()
+
+    private func animateOpen() {
+        guard let layer = content.layer else { return }
+        reveal.frame = content.bounds
+        layer.mask = reveal
+        let from = content.collapsedPath(), to = content.expandedPath()
+        reveal.removeAllAnimations()
+        reveal.path = to
+        let spring = CASpringAnimation(keyPath: "path")
+        spring.fromValue = from
+        spring.toValue = to
+        spring.mass = 1
+        spring.stiffness = 340
+        spring.damping = 26
+        spring.duration = spring.settlingDuration
+        reveal.add(spring, forKey: "open")
+        content.fadeInContents(after: 0.08)
+    }
+
+    private func animateClose(completion: @escaping @MainActor () -> Void) {
+        guard content.layer?.mask === reveal else { completion(); return }
+        let to = content.collapsedPath()
+        let shrink = CABasicAnimation(keyPath: "path")
+        shrink.fromValue = reveal.presentation()?.path ?? reveal.path
+        shrink.toValue = to
+        shrink.duration = 0.22
+        shrink.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.9, 0.6)
+        reveal.path = to
+        content.fadeOutContents(duration: 0.12)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { MainActor.assumeIsolated { completion() } }
+        reveal.add(shrink, forKey: "close")
+        CATransaction.commit()
     }
 
     func toggleVisibility() { isShown ? hide() : show() }
@@ -161,6 +187,14 @@ final class PanelController: NSObject {
         panel.isMovableByWindowBackground = settings.placement == .floating
         if isShown { panel.setFrame(geometry.frame, display: true) }
         content.applyStyle(settings, script: session.script, currentWord: session.currentWordIndex)
+        if isShown, reveal.animation(forKey: "open") == nil {
+            // Keep the reveal mask matching the panel when its size or shape changes.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            reveal.frame = content.bounds
+            reveal.path = content.expandedPath()
+            CATransaction.commit()
+        }
         shownScriptText = session.script.text
     }
 

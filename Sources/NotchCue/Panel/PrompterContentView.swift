@@ -31,6 +31,7 @@ final class PrompterContentView: NSView {
     static let cornerRadius: CGFloat = 14
     private static let hudHeight: CGFloat = 18
     private var hasEars: Bool { bandSize.height > 0 }
+    private var textDimmed = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -208,7 +209,12 @@ final class PrompterContentView: NSView {
         }
         centerLabel.textColor = hud.countdown != nil ? hud.textColor : hud.textColor.withAlphaComponent(0.6)
         centerLabel.isHidden = centerLabel.stringValue.isEmpty
-        textView.alphaValue = hud.caption != nil && hud.countdown == nil ? 0.25 : 1
+        // Only touch the alpha when the caption state flips, so the open fade-in isn't overridden each frame.
+        let dimmed = hud.caption != nil && hud.countdown == nil
+        if dimmed != textDimmed {
+            textDimmed = dimmed
+            textView.animator().alphaValue = dimmed ? 0.25 : 1
+        }
 
         messageLabel.isHidden = !showMessage
         messageLabel.stringValue = hud.message ?? ""
@@ -222,6 +228,60 @@ final class PrompterContentView: NSView {
 }
 
 extension PrompterContentView {
+    /// The full panel outline, built with the same path structure as `collapsedPath` so the two morph cleanly.
+    func expandedPath() -> CGPath {
+        let top = bandSize.height > 0 ? 0 : (roundTopCorners ? Self.cornerRadius : 0)
+        return Self.roundedPath(bounds, top: top, bottom: Self.cornerRadius)
+    }
+
+    /// The shape the panel grows out of: the notch itself, or a small pill at the top edge.
+    func collapsedPath() -> CGPath {
+        if bandSize.height > 0 {
+            let width = max(notchWidth, 60)
+            let rect = CGRect(x: bounds.midX - width / 2, y: bounds.maxY - bandSize.height,
+                              width: width, height: bandSize.height)
+            return Self.roundedPath(rect, top: 0, bottom: min(12, bandSize.height / 2))
+        }
+        let rect = CGRect(x: bounds.midX - 60, y: bounds.maxY - 12, width: 120, height: 12)
+        return Self.roundedPath(rect, top: roundTopCorners ? 6 : 0, bottom: 6)
+    }
+
+    /// Rectangle with independent top and bottom corner radii; always four arcs so paths interpolate.
+    static func roundedPath(_ r: CGRect, top: CGFloat, bottom: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: r.minX, y: r.maxY - top))
+        path.addArc(center: CGPoint(x: r.minX + bottom, y: r.minY + bottom), radius: bottom,
+                    startAngle: .pi, endAngle: 1.5 * .pi, clockwise: false)
+        path.addArc(center: CGPoint(x: r.maxX - bottom, y: r.minY + bottom), radius: bottom,
+                    startAngle: 1.5 * .pi, endAngle: 2 * .pi, clockwise: false)
+        path.addArc(center: CGPoint(x: r.maxX - top, y: r.maxY - top), radius: top,
+                    startAngle: 0, endAngle: 0.5 * .pi, clockwise: false)
+        path.addArc(center: CGPoint(x: r.minX + top, y: r.maxY - top), radius: top,
+                    startAngle: 0.5 * .pi, endAngle: .pi, clockwise: false)
+        path.closeSubpath()
+        return path
+    }
+
+    /// Script and status fade in just after the shape starts opening, so the panel "fills" as it grows.
+    func fadeInContents(after delay: TimeInterval) {
+        let views = subviews
+        views.forEach { $0.alphaValue = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                views.forEach { $0.animator().alphaValue = 1 }
+            }
+        }
+    }
+
+    func fadeOutContents(duration: TimeInterval) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            subviews.forEach { $0.animator().alphaValue = 0 }
+        }
+    }
+
     /// Applies the user's look (theme, font, spacing, alignment) and shows `script` at `currentWord`.
     func applyStyle(_ settings: AppSettings, script: Script, currentWord: Int) {
         bodyColor = settings.theme.background

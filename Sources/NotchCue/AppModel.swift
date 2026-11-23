@@ -1,18 +1,28 @@
 import AppKit
 import CueCore
 import Observation
+import SwiftUI
 
 enum SettingsPage: String, CaseIterable, Identifiable {
     case script, appearance, behavior, pace, shortcuts
     var id: String { rawValue }
 
     var title: String { rawValue.capitalized }
+    var color: Color {
+        switch self {
+        case .script: .blue
+        case .appearance: .indigo
+        case .behavior: .orange
+        case .pace: .green
+        case .shortcuts: .gray
+        }
+    }
     var symbol: String {
         switch self {
-        case .script: "doc.text"
-        case .appearance: "textformat.size"
+        case .script: "doc.text.fill"
+        case .appearance: "textformat"
         case .behavior: "waveform"
-        case .pace: "speedometer"
+        case .pace: "gauge.with.needle.fill"
         case .shortcuts: "command"
         }
     }
