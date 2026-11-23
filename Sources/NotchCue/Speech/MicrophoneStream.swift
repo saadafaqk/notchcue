@@ -2,7 +2,7 @@ import AVFoundation
 import OSLog
 import Speech
 
-let speechLog = Logger(subsystem: "com.local.notchcue", category: "speech")
+let speechLog = Logger(subsystem: "com.saadafaq.notchcue", category: "speech")
 
 /// Captures the microphone, converts to the analyzer's format and feeds `AnalyzerInput`s.
 /// Runs on the audio thread; rebuilds itself when the audio route changes (e.g. AirPods disconnect).

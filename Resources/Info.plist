@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>com.local.notchcue</string>
+	<string>com.saadafaq.notchcue</string>
 	<key>CFBundleName</key>
 	<string>NotchCue</string>
 	<key>CFBundleDisplayName</key>
