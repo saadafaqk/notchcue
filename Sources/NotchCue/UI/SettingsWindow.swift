@@ -101,12 +101,20 @@ private struct ScriptPage: View {
                     .frame(minHeight: 300)
                     .padding(.vertical, 4)
             } header: {
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     Text("Your script")
                     Spacer()
                     Text("\(wordCount) words · \(readingTime) at \(Int(model.settings.targetPace)) wpm")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                    Button {
+                        model.toggle()
+                    } label: {
+                        Label(model.isActive ? "Pause" : "Start Prompting",
+                              systemImage: model.isActive ? "pause.fill" : "play.fill")
+                    }
+                    .controlSize(.small)
+                    .help("⌃⌥⌘P")
                 }
             } footer: {
                 Text("Put cues like [Pause] or [Smile] in square brackets. NotchCue shows them but doesn’t wait for you to say them.")
@@ -115,17 +123,6 @@ private struct ScriptPage: View {
             }
         }
         .formStyle(.grouped)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.toggle()
-                } label: {
-                    Label(model.isActive ? "Pause Prompting" : "Start Prompting",
-                          systemImage: model.isActive ? "pause.fill" : "play.fill")
-                }
-                .help("⌃⌥⌘P")
-            }
-        }
     }
 }
 

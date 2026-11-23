@@ -6,14 +6,15 @@ import CueCore
 final class PrompterTextView: NSView {
     private let scrollView = NSScrollView()
     private let textView = NSTextView()
-    private let topFade = CAGradientLayer()
-    private let bottomFade = CAGradientLayer()
+    private let topFade = FadeView(edge: .top)
+    private let bottomFade = FadeView(edge: .bottom)
 
     private var script = Script("")
     private var textColor = NSColor.white
     private var currentIndex = 0
 
-    static let fadeHeight: CGFloat = 24
+    /// A subtle fade at an edge, shown only when more text lies beyond it ("more is coming").
+    static let fadeHeight: CGFloat = 28
     static let readingLine = 0.3
 
     override init(frame: NSRect) {
@@ -32,8 +33,9 @@ final class PrompterTextView: NSView {
         scrollView.drawsBackground = false
         scrollView.verticalScrollElasticity = .none
         addSubview(scrollView)
-        layer?.addSublayer(topFade)
-        layer?.addSublayer(bottomFade)
+        // Real views above the scroll view, so AppKit can never re-stack them underneath the text.
+        addSubview(topFade)
+        addSubview(bottomFade)
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -42,11 +44,8 @@ final class PrompterTextView: NSView {
         super.layout()
         scrollView.frame = bounds
         textView.frame.size.width = bounds.width
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
         topFade.frame = CGRect(x: 0, y: bounds.height - Self.fadeHeight, width: bounds.width, height: Self.fadeHeight)
         bottomFade.frame = CGRect(x: 0, y: 0, width: bounds.width, height: Self.fadeHeight)
-        CATransaction.commit()
         scroll(animated: false)
     }
 
@@ -65,8 +64,8 @@ final class PrompterTextView: NSView {
             attributed.addAttribute(.font, value: italic, range: word.range)
         }
         textView.textStorage?.setAttributedString(attributed)
-        topFade.colors = [background.withAlphaComponent(0).cgColor, background.cgColor]
-        bottomFade.colors = [background.cgColor, background.withAlphaComponent(0).cgColor]
+        topFade.color = background
+        bottomFade.color = background
         currentIndex = -1
         setCurrentWord(0, animated: false)
     }
@@ -98,6 +97,7 @@ final class PrompterTextView: NSView {
         let target = ScrollMath.targetOffset(lineMinY: lineMinY, viewportHeight: scrollView.contentView.bounds.height,
                                              contentHeight: textView.frame.height, readingLine: Self.readingLine)
         let origin = NSPoint(x: 0, y: target)
+        updateFades(offset: target, animated: animated)
         if animated {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.25
@@ -108,5 +108,53 @@ final class PrompterTextView: NSView {
             scrollView.contentView.setBoundsOrigin(origin)
         }
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+}
+
+extension PrompterTextView {
+    /// Top fade when text is scrolled away above; bottom fade when more text waits below.
+    private func updateFades(offset: Double, animated: Bool) {
+        let hiddenBelow = textView.frame.height - (offset + scrollView.contentView.bounds.height)
+        let showTop = offset > 2, showBottom = hiddenBelow > 2
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = animated ? 0.25 : 0
+            topFade.animator().alphaValue = showTop ? 1 : 0
+            bottomFade.animator().alphaValue = showBottom ? 1 : 0
+        }
+    }
+}
+
+/// A soft gradient from the panel colour to clear, toward the text.
+final class FadeView: NSView {
+    enum Edge { case top, bottom }
+    private let edge: Edge
+    private let gradient = CAGradientLayer()
+    var color: NSColor = .black { didSet { updateColors() } }
+
+    init(edge: Edge) {
+        self.edge = edge
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.addSublayer(gradient)
+        updateColors()
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gradient.frame = bounds
+        CATransaction.commit()
+    }
+
+    // Clicks and hover pass straight through to the panel.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    private func updateColors() {
+        // Layer y runs bottom-up: the bottom edge is solid at y = 0, the top edge is solid at y = 1.
+        let solid = color.cgColor, clear = color.withAlphaComponent(0).cgColor
+        gradient.colors = edge == .bottom ? [solid, clear] : [clear, solid]
     }
 }
