@@ -245,3 +245,52 @@ private final class Harness {
     for _ in 0..<20 { await Task.yield() }
     #expect(h.session.state == .error("Microphone access denied"))
 }
+
+// MARK: Prediction (hides the recognizer's ~1 s latency)
+
+@MainActor @Test func predictionLeadsBetweenUpdates() async {
+    let h = Harness()
+    await h.session.start()
+    await h.say("this is notchcue", final: true)     // position 3
+    h.clock.advance(0.4)                               // 150 wpm fallback = 2.5 words/s → +1
+    h.session.tick()
+    #expect(abs(h.session.spokenPosition - 4) < 0.001)
+}
+
+@MainActor @Test func predictionCapsAtTwoWords() async {
+    let h = Harness()
+    await h.session.start()
+    await h.say("this is notchcue", final: true)
+    h.clock.advance(3)
+    h.session.tick()
+    #expect(h.session.spokenPosition == 5)
+}
+
+@MainActor @Test func lateRecognizerUpdateDoesNotPullBack() async {
+    let h = Harness()
+    await h.session.start()
+    await h.say("this is notchcue", final: true)
+    h.clock.advance(3)
+    h.session.tick()                                   // predicted 5
+    await h.say("its")                                 // recognizer confirms 4
+    #expect(h.session.spokenPosition == 5)
+}
+
+@MainActor @Test func rereadStillMovesBackDespitePrediction() async {
+    let h = Harness()
+    await h.session.start()
+    await h.say("this is notchcue its a tiny mac app that hides your script right", final: true) // 13
+    await h.say("hides your script right")             // re-read → aligner stays/moves to 13
+    await h.say("a tiny mac app", final: false)        // reread phrase ending at 8
+    #expect(h.session.spokenPosition == 8)
+}
+
+@MainActor @Test func noPredictionWhilePaused() async {
+    let h = Harness()
+    await h.session.start()
+    await h.say("this is notchcue", final: true)
+    await h.session.pause()
+    h.clock.advance(1)
+    h.session.tick()
+    #expect(h.session.spokenPosition == 3)
+}

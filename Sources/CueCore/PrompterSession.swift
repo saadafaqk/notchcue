@@ -52,6 +52,14 @@ public final class PrompterSession {
     @ObservationIgnored private var resumeState: PrompterState = .running
     @ObservationIgnored private var listenTask: Task<Void, Never>?
     @ObservationIgnored private var isListening = false
+    /// When the recognizer last moved the position forward; drives the latency-hiding prediction.
+    @ObservationIgnored private var lastAdvance: Date?
+
+    /// Prediction: between recognizer updates the position keeps moving at the reader's pace,
+    /// at most `predictionMaxLead` words ahead and only for `predictionWindow` seconds after an update.
+    public static let predictionMaxLead = 2.0
+    public static let predictionWindow = 0.8
+    public static let fallbackWordsPerMinute = 150.0
 
     public init(source: TranscriptSource,
                 now: @escaping () -> Date = Date.init,
@@ -134,6 +142,7 @@ public final class PrompterSession {
         holdTick = nil
         aligner.reset(to: Int(spokenPosition))
         finalizedTail = []
+        lastAdvance = nil
     }
 
     /// Refreshes the clock-driven values. The panel calls this a few times a second, and every frame while holding.
@@ -144,6 +153,11 @@ public final class PrompterSession {
             let advance = options.holdWordsPerMinute / 60 * t.timeIntervalSince(last)
             holdTick = t
             move(to: min(Double(script.spoken.count), spokenPosition + advance))
+        } else if state == .running, options.mode == .voice, let last = lastAdvance {
+            let rate = (wordsPerMinute ?? Self.fallbackWordsPerMinute) / 60
+            let lead = min(Self.predictionMaxLead, rate * min(now().timeIntervalSince(last), Self.predictionWindow))
+            let predicted = min(Double(aligner.position) + lead, Double(max(0, script.spoken.count - 1)))
+            if predicted > spokenPosition { move(to: predicted) }
         }
         refreshPace()
     }
@@ -163,7 +177,8 @@ public final class PrompterSession {
             state = .running
             lastTick = now()
         }
-        move(to: Double(after))
+        lastAdvance = after > before ? now() : nil
+        move(to: after < before ? Double(after) : max(Double(after), spokenPosition))
         if aligner.isFinished { await finish() }
     }
 
@@ -263,6 +278,7 @@ public final class PrompterSession {
         currentWordIndex = 0
         elapsed = 0
         finalizedTail = []
+        lastAdvance = nil
         pace = PaceMeter()
         wordsPerMinute = nil
         timeLeft = nil

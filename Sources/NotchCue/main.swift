@@ -1,4 +1,4 @@
-// Task 6 harness: real AnalyzerSource + PrompterSession on the sample script, logging the position.
+// Task 7 harness: real AnalyzerSource + PrompterSession + notch panel on the sample script.
 // Replaced by NotchCueApp.swift in Task 8.
 import AppKit
 import CueCore
@@ -10,13 +10,19 @@ let sampleScript = "This is NotchCue. [Pause] It's a tiny Mac app that hides you
 @MainActor
 final class HarnessDelegate: NSObject, NSApplicationDelegate {
     private let session = PrompterSession(source: AnalyzerSource())
+    private let settings = AppSettings()
+    private var panel: PanelController?
     private var lastIndex = -1
     private var lastState = ""
     private var timer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        session.options = SessionOptions(countdownSeconds: 0)
+        Fonts.registerBundled()
+        session.options = settings.sessionOptions
         session.load(sampleScript)
+        let panel = PanelController(session: session, settings: settings)
+        panel.show()
+        self.panel = panel
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.report() }
         }
