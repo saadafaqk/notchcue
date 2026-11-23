@@ -122,6 +122,8 @@ final class AppModel {
             guard event.buttonNumber == 2 else { return }
             MainActor.assumeIsolated {
                 guard let self, self.settings.middleButtonHold else { return }
+                if event.type == .otherMouseDown,
+                   !Self.middleButtonMayHold(state: self.session.state, panelShown: self.panelShown) { return }
                 event.type == .otherMouseDown ? self.holdBegan() : self.holdEnded()
             }
         }
@@ -133,6 +135,15 @@ final class AppModel {
             return $0
         }) {
             mouseMonitors.append(local)
+        }
+    }
+
+    /// A middle-click is an everyday action (new tab, paste), so it only scrolls while a take is under way
+    /// or the prompter is visible; it never starts a take or the microphone from idle on its own.
+    static func middleButtonMayHold(state: PrompterState, panelShown: Bool) -> Bool {
+        switch state {
+        case .running, .paused, .waitingForFirstWords, .countingDown: true
+        default: panelShown
         }
     }
 
@@ -168,7 +179,7 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             ScriptStore.save(text)
-            self?.session.load(text)
+            self?.session.load(text) // no-op when unchanged; re-anchors mid-take
         }
     }
 

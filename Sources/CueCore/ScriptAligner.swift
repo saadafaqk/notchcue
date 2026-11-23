@@ -27,6 +27,12 @@ public struct ScriptAligner: Sendable {
 
     public var isFinished: Bool { position >= spoken.count }
 
+    /// Words too common to prove a skip on their own.
+    static let commonWords: Set<String> = [
+        "the", "and", "that", "this", "with", "have", "your", "they", "them", "then", "there", "what",
+        "when", "just", "like", "from", "into", "also", "very", "really", "want", "wants", "going",
+    ]
+
     public mutating func reset(to newPosition: Int = 0) {
         position = min(max(0, newPosition), spoken.count)
     }
@@ -50,6 +56,12 @@ public struct ScriptAligner: Sendable {
             let need = d < 0 ? 4 : d == 1 ? 1 : d <= 8 ? 2 : 3
             guard score >= need else { continue }
             if score == 1 && anchor.count < 4 { continue } // a lone short word is too weak to move on
+            if d > 1, anchor.count < 4 || Self.commonWords.contains(anchor) {
+                // Skipping ahead on a short or common word needs two matches *past* the current position;
+                // words the reader already said ("I want to…") are not evidence of a skip.
+                let fresh = spoken[max(position, end - config.tail - 2)..<end]
+                if fuzzyLCS(tail, fresh, threshold: config.similarity) < 2 { continue }
+            }
             if let current = best {
                 let better = score > current.score
                     || (score == current.score && abs(d) < abs(current.distance))

@@ -12,6 +12,8 @@ final class MicrophoneStream: @unchecked Sendable {
     private var analyzerFormat: AVAudioFormat?
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
     private var observer: NSObjectProtocol?
+    /// Called when the input can't be restarted after a route change (e.g. the only mic was unplugged).
+    var onFailure: (@Sendable (Error) -> Void)?
 
     func start(analyzerFormat: AVAudioFormat, into continuation: AsyncStream<AnalyzerInput>.Continuation) throws {
         lock.withLock {
@@ -24,6 +26,7 @@ final class MicrophoneStream: @unchecked Sendable {
             speechLog.info("audio configuration changed, restarting input")
             do { try self?.restartTap() } catch {
                 speechLog.error("restart failed: \(error.localizedDescription, privacy: .public)")
+                self?.onFailure?(error)
             }
         }
         try restartTap()

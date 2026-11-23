@@ -35,10 +35,11 @@ final class AnalyzerSource: TranscriptSource, @unchecked Sendable {
         }
 
         let (input, inputContinuation) = AsyncStream<AnalyzerInput>.makeStream()
+        let (output, outputContinuation) = AsyncThrowingStream<TranscriptEvent, Error>.makeStream()
         let mic = MicrophoneStream()
+        mic.onFailure = { _ in outputContinuation.finish(throwing: SpeechError.noMicrophone) }
         try mic.start(analyzerFormat: format, into: inputContinuation)
 
-        let (output, outputContinuation) = AsyncThrowingStream<TranscriptEvent, Error>.makeStream()
         let results = Task.detached {
             do {
                 for try await result in transcriber.results {

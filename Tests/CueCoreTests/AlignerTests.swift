@@ -26,7 +26,10 @@ private func aligner(from position: Int = 0) -> ScriptAligner {
 @Test func misrecognitionStillAdvances() {
     var a = aligner()
     feed(&a, "this is notch queue its a tiny mack app")
-    #expect(a.position >= 7)
+    #expect(a.position >= 6)
+    // A short word beside a misheard one doesn't justify a skip alone; the next real words catch up.
+    feed(&a, "this is notch queue its a tiny mack app that hides")
+    #expect(a.position == 10)
 }
 
 @Test func adLibDoesNotAdvance() {

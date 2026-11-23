@@ -54,12 +54,22 @@ public final class PrompterSession {
     @ObservationIgnored private var isListening = false
     /// When the recognizer last moved the position forward; drives the latency-hiding prediction.
     @ObservationIgnored private var lastAdvance: Date?
+    /// Bumped by every start and every script load; an in-flight start that sees a newer value gives up.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var isStarting = false
+    /// Hold intent, recorded before any await so a release during a slow start is never lost.
+    @ObservationIgnored private var holdRequested = false
 
     /// Prediction: between recognizer updates the position keeps moving at the reader's pace,
     /// at most `predictionMaxLead` words ahead and only for `predictionWindow` seconds after an update.
     public static let predictionMaxLead = 2.0
     public static let predictionWindow = 0.8
     public static let fallbackWordsPerMinute = 150.0
+    /// Seconds of no progress at the last word before the take ends anyway (its word may never be recognised).
+    public static let endSilenceTimeout = 3.0
+    /// How far into the script "the first words" may be matched while waiting to start.
+    public static let openingLookahead = 4
+    public nonisolated static let stoppedListeningMessage = "NotchCue stopped listening. Press Start to try again."
 
     public init(source: TranscriptSource,
                 now: @escaping () -> Date = Date.init,
@@ -72,18 +82,58 @@ public final class PrompterSession {
     // MARK: Script
 
     public func load(_ text: String) {
-        stopListening()
-        script = Script(text)
-        aligner = ScriptAligner(spoken: script.spoken)
-        resetProgress()
-        isHolding = false
-        state = .idle
+        guard text != script.text else { return }
+        switch state {
+        case .running, .paused, .waitingForFirstWords:
+            reanchor(to: Script(text))
+        default:
+            generation += 1 // cancels a start in flight (e.g. during the countdown)
+            isStarting = false
+            stopListening()
+            script = Script(text)
+            aligner = ScriptAligner(spoken: script.spoken)
+            resetProgress()
+            isHolding = false
+            holdRequested = false
+            state = .idle
+        }
+    }
+
+    /// Swaps in an edited script without losing the take: finds the words just read in the new text.
+    private func reanchor(to newScript: Script) {
+        // Anchor on what the recognizer confirmed, not on the predicted lead.
+        let old = script.spoken, position = min(aligner.position, old.count)
+        let context = Array(old[max(0, position - 6)..<position])
+        var best = min(position, newScript.spoken.count)
+        if !context.isEmpty, newScript.spoken.count >= context.count {
+            var bestScore = 0, bestDistance = Int.max
+            for end in context.count...newScript.spoken.count {
+                let window = newScript.spoken[(end - context.count)..<end]
+                let score = zip(window, context).filter { $0 == $1 }.count
+                let distance = abs(end - position)
+                if score > bestScore || (score == bestScore && score > 0 && distance < bestDistance) {
+                    best = end; bestScore = score; bestDistance = distance
+                }
+            }
+        }
+        if !context.isEmpty, (context.count...max(context.count, newScript.spoken.count)).allSatisfy({ end in
+            end > newScript.spoken.count || zip(newScript.spoken[(end - context.count)..<end], context).allSatisfy { $0 != $1 }
+        }) {
+            best = 0 // nothing in common: it's a different script, so start at its top
+        }
+        script = newScript
+        aligner = ScriptAligner(spoken: newScript.spoken)
+        aligner.reset(to: best)
+        finalizedTail = []
+        lastAdvance = nil
+        move(to: Double(aligner.position))
     }
 
     // MARK: Transport
 
     public func start() async {
         if case .countingDown = state { return }
+        guard !isStarting else { return }
         await begin(countdown: options.countdownSeconds)
     }
 
@@ -123,19 +173,24 @@ public final class PrompterSession {
     // MARK: Hold to scroll
 
     public func holdBegan() async {
-        guard !isHolding else { return }
+        guard !isHolding, !holdRequested else { return }
+        holdRequested = true
         switch state {
-        case .idle, .finished, .error: await begin(countdown: 0)
+        case .idle, .finished, .error:
+            guard !isStarting else { return }
+            await begin(countdown: 0)
         case .paused: await resume()
         default: break
         }
-        guard state == .running || state == .waitingForFirstWords else { return }
+        // The key may have been released while we were starting.
+        guard holdRequested, state == .running || state == .waitingForFirstWords else { return }
         if state == .waitingForFirstWords { state = .running; lastTick = now() }
         isHolding = true
         holdTick = now()
     }
 
     public func holdEnded() {
+        holdRequested = false
         guard isHolding else { return }
         tick()
         isHolding = false
@@ -158,6 +213,11 @@ public final class PrompterSession {
             let lead = min(Self.predictionMaxLead, rate * min(now().timeIntervalSince(last), Self.predictionWindow))
             let predicted = min(Double(aligner.position) + lead, Double(max(0, script.spoken.count - 1)))
             if predicted > spokenPosition { move(to: predicted) }
+            // The last word can be misheard (names especially); after a quiet spell there, end the take.
+            if aligner.position >= script.spoken.count - 1,
+               now().timeIntervalSince(last) >= Self.endSilenceTimeout {
+                Task { await finish() }
+            }
         }
         refreshPace()
     }
@@ -171,7 +231,19 @@ public final class PrompterSession {
         let heard = finalizedTail + words
         if event.isFinal { finalizedTail = Array(heard.suffix(12)) }
         let before = aligner.position
-        let after = aligner.ingest(heard)
+        let after: Int
+        if state == .waitingForFirstWords {
+            // Only the script's opening counts as "the first words": a short lookahead from the top,
+            // so pre-roll chatter that shares a phrase further in can't start the take.
+            var opening = AlignerConfig.standard
+            opening.lookahead = Self.openingLookahead
+            var probe = ScriptAligner(spoken: script.spoken, config: opening)
+            probe.reset(to: before)
+            after = probe.ingest(heard)
+            aligner.reset(to: after)
+        } else {
+            after = aligner.ingest(heard)
+        }
         guard after != before else { return }
         if state == .waitingForFirstWords {
             state = .running
@@ -185,7 +257,17 @@ public final class PrompterSession {
     // MARK: Internals
 
     private func begin(countdown: Int) async {
-        stopListening()
+        generation += 1
+        let mine = generation
+        isStarting = true
+        defer { if generation == mine { isStarting = false } }
+        await stopListeningAndWait()
+        guard generation == mine else { return }
+        if state == .finished || aligner.isFinished {
+            // A new take after the last one ended starts again from the top.
+            aligner.reset(to: 0)
+            resetProgress()
+        }
         if script.spoken.isEmpty {
             moveToEnd()
             state = .finished
@@ -194,14 +276,18 @@ public final class PrompterSession {
         for n in stride(from: countdown, to: 0, by: -1) {
             state = .countingDown(n)
             await sleep(.seconds(1))
+            guard generation == mine else { return }
         }
         if options.mode == .voice {
             do {
                 let stream = try await source.events(vocabulary: Vocabulary.terms(in: script))
+                guard generation == mine else { await source.stop(); return }
                 isListening = true
                 listenTask = Task { [weak self] in
                     do {
                         for try await event in stream { await self?.receive(event) }
+                        // Ended without an error: still not "running" if nothing is listening any more.
+                        if !Task.isCancelled { self?.listeningEndedUnexpectedly() }
                     } catch is CancellationError {
                         // Stopping the source cancels its stream; that's a normal end, not a failure.
                     } catch {
@@ -209,6 +295,7 @@ public final class PrompterSession {
                     }
                 }
             } catch {
+                guard generation == mine else { return }
                 fail(error)
                 return
             }
@@ -219,7 +306,17 @@ public final class PrompterSession {
             ? .waitingForFirstWords : .running
     }
 
+    private struct StoppedListening: LocalizedError {
+        var errorDescription: String? { PrompterSession.stoppedListeningMessage }
+    }
+
+    private func listeningEndedUnexpectedly() {
+        guard isListening, state != .finished else { return }
+        fail(StoppedListening())
+    }
+
     private func finish() async {
+        guard state != .finished else { return }
         accumulate()
         isHolding = false
         state = .finished
@@ -234,6 +331,16 @@ public final class PrompterSession {
     private func fail(_ error: Error) {
         stopListening()
         state = .error(error.localizedDescription)
+    }
+
+    /// Stops the previous pipeline and waits for it, so a new start never races an old stop.
+    private func stopListeningAndWait() async {
+        listenTask?.cancel()
+        listenTask = nil
+        if isListening {
+            isListening = false
+            await source.stop()
+        }
     }
 
     private func stopListening() {

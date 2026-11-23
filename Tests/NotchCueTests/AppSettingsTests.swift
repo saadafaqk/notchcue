@@ -1,4 +1,5 @@
 import Foundation
+import CueCore
 import Testing
 @testable import NotchCue
 
@@ -30,4 +31,15 @@ private func freshSettings() -> (AppSettings, UserDefaults) {
     let settings = AppSettings(defaults: defaults)
     #expect(settings.fontSize == AppSettings.fontSizeRange.upperBound)
     #expect(settings.panelHeight == AppSettings.heightRange.lowerBound)
+}
+
+/// I6: a stray middle-click while idle must not start a take or the microphone.
+@MainActor @Test func middleButtonOnlyHoldsDuringATake() {
+    #expect(!AppModel.middleButtonMayHold(state: .idle, panelShown: false))
+    #expect(!AppModel.middleButtonMayHold(state: .finished, panelShown: false))
+    #expect(!AppModel.middleButtonMayHold(state: .error("x"), panelShown: false))
+    #expect(AppModel.middleButtonMayHold(state: .running, panelShown: true))
+    #expect(AppModel.middleButtonMayHold(state: .paused, panelShown: true))
+    #expect(AppModel.middleButtonMayHold(state: .waitingForFirstWords, panelShown: true))
+    #expect(AppModel.middleButtonMayHold(state: .idle, panelShown: true))
 }
